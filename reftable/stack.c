@@ -680,8 +680,19 @@ int reftable_addition_commit(struct reftable_addition *add)
 	if (err)
 		goto done;
 
-	if (!add->stack->disable_auto_compact)
+	if (!add->stack->disable_auto_compact) {
+		/*
+		 * Auto-compact the stack to keep the number of tables in
+		 * control. Note that we explicitly ignore locking issues which
+		 * may indicate that a concurrent process is already trying to
+		 * compact tables. This is fine, so we simply ignore that error
+		 * condition.
+		 */
 		err = reftable_stack_auto_compact(add->stack);
+		if (err < 0 && err != REFTABLE_LOCK_ERROR)
+			goto done;
+		err = 0;
+	}
 
 done:
 	reftable_addition_close(add);
