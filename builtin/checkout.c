@@ -1704,10 +1704,11 @@ static char cb_option = 'b';
 
 static int checkout_main(int argc, const char **argv, const char *prefix,
 			 struct checkout_opts *opts, struct option *options,
-			 const char * const usagestr[],
-			 struct branch_info *new_branch_info)
+			 const char * const usagestr[])
 {
 	int parseopt_flags = 0;
+	struct branch_info new_branch_info = { 0 };
+	int ret;
 
 	opts->overwrite_ignore = 1;
 	opts->prefix = prefix;
@@ -1823,7 +1824,7 @@ static int checkout_main(int argc, const char **argv, const char *prefix,
 			opts->track == BRANCH_TRACK_UNSPECIFIED &&
 			!opts->new_branch;
 		int n = parse_branchname_arg(argc, argv, dwim_ok,
-					     new_branch_info, opts, &rev);
+					     &new_branch_info, opts, &rev);
 		argv += n;
 		argc -= n;
 	} else if (!opts->accept_ref && opts->from_treeish) {
@@ -1832,7 +1833,7 @@ static int checkout_main(int argc, const char **argv, const char *prefix,
 		if (repo_get_oid_mb(the_repository, opts->from_treeish, &rev))
 			die(_("could not resolve %s"), opts->from_treeish);
 
-		setup_new_branch_info_and_source_tree(new_branch_info,
+		setup_new_branch_info_and_source_tree(&new_branch_info,
 						      opts, &rev,
 						      opts->from_treeish);
 
@@ -1852,7 +1853,7 @@ static int checkout_main(int argc, const char **argv, const char *prefix,
 		 * Try to give more helpful suggestion.
 		 * new_branch && argc > 1 will be caught later.
 		 */
-		if (opts->new_branch && argc == 1 && !new_branch_info->commit)
+		if (opts->new_branch && argc == 1 && !new_branch_info.commit)
 			die(_("'%s' is not a commit and a branch '%s' cannot be created from it"),
 				argv[0], opts->new_branch);
 
@@ -1902,9 +1903,16 @@ static int checkout_main(int argc, const char **argv, const char *prefix,
 	}
 
 	if (opts->patch_mode || opts->pathspec.nr)
-		return checkout_paths(opts, new_branch_info);
+		ret = checkout_paths(opts, &new_branch_info);
 	else
-		return checkout_branch(opts, new_branch_info);
+		ret = checkout_branch(opts, &new_branch_info);
+
+	branch_info_release(&new_branch_info);
+	clear_pathspec(&opts->pathspec);
+	free(opts->pathspec_from_file);
+	free(options);
+
+	return ret;
 }
 
 int cmd_checkout(int argc, const char **argv, const char *prefix)
@@ -1922,8 +1930,6 @@ int cmd_checkout(int argc, const char **argv, const char *prefix)
 		OPT_BOOL(0, "overlay", &opts.overlay_mode, N_("use overlay mode (default)")),
 		OPT_END()
 	};
-	int ret;
-	struct branch_info new_branch_info = { 0 };
 
 	memset(&opts, 0, sizeof(opts));
 	opts.dwim_new_local_branch = 1;
@@ -1953,13 +1959,8 @@ int cmd_checkout(int argc, const char **argv, const char *prefix)
 	options = add_common_switch_branch_options(&opts, options);
 	options = add_checkout_path_options(&opts, options);
 
-	ret = checkout_main(argc, argv, prefix, &opts,
-			    options, checkout_usage, &new_branch_info);
-	branch_info_release(&new_branch_info);
-	clear_pathspec(&opts.pathspec);
-	free(opts.pathspec_from_file);
-	FREE_AND_NULL(options);
-	return ret;
+	return checkout_main(argc, argv, prefix, &opts, options,
+			     checkout_usage);
 }
 
 int cmd_switch(int argc, const char **argv, const char *prefix)
@@ -1977,8 +1978,6 @@ int cmd_switch(int argc, const char **argv, const char *prefix)
 			 N_("throw away local modifications")),
 		OPT_END()
 	};
-	int ret;
-	struct branch_info new_branch_info = { 0 };
 
 	memset(&opts, 0, sizeof(opts));
 	opts.dwim_new_local_branch = 1;
@@ -1997,11 +1996,8 @@ int cmd_switch(int argc, const char **argv, const char *prefix)
 
 	cb_option = 'c';
 
-	ret = checkout_main(argc, argv, prefix, &opts,
-			    options, switch_branch_usage, &new_branch_info);
-	branch_info_release(&new_branch_info);
-	FREE_AND_NULL(options);
-	return ret;
+	return checkout_main(argc, argv, prefix, &opts, options,
+			     switch_branch_usage);
 }
 
 int cmd_restore(int argc, const char **argv, const char *prefix)
@@ -2020,8 +2016,6 @@ int cmd_restore(int argc, const char **argv, const char *prefix)
 		OPT_BOOL(0, "overlay", &opts.overlay_mode, N_("use overlay mode")),
 		OPT_END()
 	};
-	int ret;
-	struct branch_info new_branch_info = { 0 };
 
 	memset(&opts, 0, sizeof(opts));
 	opts.accept_ref = 0;
@@ -2036,9 +2030,6 @@ int cmd_restore(int argc, const char **argv, const char *prefix)
 	options = add_common_options(&opts, options);
 	options = add_checkout_path_options(&opts, options);
 
-	ret = checkout_main(argc, argv, prefix, &opts,
-			    options, restore_usage, &new_branch_info);
-	branch_info_release(&new_branch_info);
-	FREE_AND_NULL(options);
-	return ret;
+	return checkout_main(argc, argv, prefix, &opts, options,
+			     restore_usage);
 }
