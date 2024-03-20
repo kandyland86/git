@@ -529,9 +529,9 @@ int reftable_stack_add(struct reftable_stack *st,
 {
 	int err = stack_try_add(st, write, arg);
 	if (err < 0) {
-		if (err == REFTABLE_LOCK_ERROR) {
+		if (err == REFTABLE_OUTDATED_ERROR) {
 			/* Ignore error return, we want to propagate
-			   REFTABLE_LOCK_ERROR.
+			   REFTABLE_OUTDATED_ERROR.
 			*/
 			reftable_stack_reload(st);
 		}
@@ -590,9 +590,8 @@ static int reftable_stack_init_addition(struct reftable_addition *add,
 	err = stack_uptodate(st);
 	if (err < 0)
 		goto done;
-
-	if (err > 1) {
-		err = REFTABLE_LOCK_ERROR;
+	if (err > 0) {
+		err = REFTABLE_OUTDATED_ERROR;
 		goto done;
 	}
 
@@ -681,8 +680,19 @@ int reftable_addition_commit(struct reftable_addition *add)
 	if (err)
 		goto done;
 
-	if (!add->stack->disable_auto_compact)
+	if (!add->stack->disable_auto_compact) {
+		/*
+		 * Auto-compact the stack to keep the number of tables in
+		 * control. Note that we explicitly ignore locking issues which
+		 * may indicate that a concurrent process is already trying to
+		 * compact tables. This is fine, so we simply ignore that error
+		 * condition.
+		 */
 		err = reftable_stack_auto_compact(add->stack);
+		if (err < 0 && err != REFTABLE_LOCK_ERROR)
+			goto done;
+		err = 0;
+	}
 
 done:
 	reftable_addition_close(add);
@@ -713,10 +723,6 @@ static int stack_try_add(struct reftable_stack *st,
 	int err = reftable_stack_init_addition(&add, st);
 	if (err < 0)
 		goto done;
-	if (err > 0) {
-		err = REFTABLE_LOCK_ERROR;
-		goto done;
-	}
 
 	err = reftable_addition_add(&add, write_table, arg);
 	if (err < 0)
@@ -1008,7 +1014,7 @@ static int stack_compact_range(struct reftable_stack *st,
 					LOCK_NO_DEREF);
 	if (err < 0) {
 		if (errno == EEXIST)
-			err = 1;
+			err = REFTABLE_LOCK_ERROR;
 		else
 			err = REFTABLE_IO_ERROR;
 		goto done;
@@ -1030,7 +1036,7 @@ static int stack_compact_range(struct reftable_stack *st,
 						table_name.buf, LOCK_NO_DEREF);
 		if (err < 0) {
 			if (errno == EEXIST)
-				err = 1;
+				err = REFTABLE_LOCK_ERROR;
 			else
 				err = REFTABLE_IO_ERROR;
 			goto done;
@@ -1080,7 +1086,7 @@ static int stack_compact_range(struct reftable_stack *st,
 					LOCK_NO_DEREF);
 	if (err < 0) {
 		if (errno == EEXIST)
-			err = 1;
+			err = REFTABLE_LOCK_ERROR;
 		else
 			err = REFTABLE_IO_ERROR;
 		goto done;
@@ -1192,7 +1198,7 @@ static int stack_compact_range_stats(struct reftable_stack *st,
 				     struct reftable_log_expiry_config *config)
 {
 	int err = stack_compact_range(st, first, last, config);
-	if (err > 0)
+	if (err == REFTABLE_LOCK_ERROR)
 		st->stats.failures++;
 	return err;
 }
